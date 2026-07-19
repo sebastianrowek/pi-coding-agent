@@ -1,0 +1,13 @@
+.git
+node_modules
+scripts
+biome.json
+*.ps1
+*.bat
+*.sh
+packages/tui/test
+packages/tui/native
+packages/ai/test
+packages/agent/test
+packages/coding-agent/test
+packages/coding-agent/scripts

@@ -152,8 +152,8 @@ describe.skipIf(!process.env.OPENAI_API_KEY)("OpenAI thinking disable E2E", () =
 });
 
 describe.skipIf(!process.env.OPENROUTER_API_KEY)("OpenRouter thinking disable E2E", () => {
-	it("disables thinking for Qwen 3.5 reasoning models", { retry: 2, timeout: 30000 }, async () => {
-		await expectThinkingDisabledE2E(getModel("openrouter", "qwen/qwen3.5-plus-02-15"), {
+	it("disables thinking for DeepSeek R1", { retry: 2, timeout: 30000 }, async () => {
+		await expectThinkingDisabledE2E(getModel("openrouter", "deepseek/deepseek-r1"), {
 			maxOutputTokens: 100,
 		});
 	});

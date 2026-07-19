@@ -97,3 +97,119 @@ MIT
   <br /><br />
   <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
 </p>
+
+## Fork: Corporate Laptop Setup
+
+This is a personal fork of [earendil-works/pi](https://github.com/earendil-works/pi) adapted for use on a company laptop behind a **TLS-intercepting corporate proxy** (self-signed certificate).
+
+### Changes from upstream
+
+#### Core modifications
+- **`resourcePaths` setting** — If you want repo-committed skills/extensions to work no matter where you start pi from, add their `.pi` root to `"resourcePaths": [...]` in `~/.pi/agent/settings.json`. Pi then auto-discovers `extensions/`, `skills/`, `prompts/`, and `themes/` from that root, which keeps the resources in the repo but makes them available globally. 
+- **Corporate certificate handling** — TO BE FILLED
+
+
+#### Extensions (`.pi/extensions/`)
+
+| Extension | Description |
+|-----------|-------------|
+| **rlm** | Research via iterative Python-REPL investigation. Spawns an investigator loop with `kb_search`/`kb_read` builtins, analyst LLM delegation, recursion, and NDJSON run logging. Exposed as `rlm_query` tool. |
+| **web-fetch** | Fetch URLs and extract readable content as markdown (Readability + Turndown, PDF support, Jina Reader fallback). |
+| **memory** | Persistent memory store across sessions. |
+| **bash-guard (deactivated)** | Safety layer for bash command execution. |
+| **ask-user-question (deactivated)** | Tool for the agent to ask clarifying questions mid-turn. |
+| **status-footer** | Status bar showing session info. |
+| **tps** | Tokens-per-second display. |
+| **redraws** | TUI redraw helpers. |
+| **prompt-url-widget** | URL display in prompt area. |
+
+#### Skills (`.pi/skills/`)
+
+| Skill | Description |
+|-------|-------------|
+| **pdf-reader** | Read and comprehend PDF files (math lecture notes, academic papers). |
+| **readme-generator** | Generate accurate READMEs from actual code; handles monorepos. |
+| **high-signal-chart-workflow** | Data story to publication-quality chart via parallel variants and design verification. |
+| **add-llm-provider** | Checklist for adding a new LLM provider to `packages/ai`. |
+
+### Installation (Windows, company laptop)
+
+**Prerequisites:**
+
+1. [Git for Windows](https://git-scm.com/download/win) (provides Git Bash, required by pi)
+2. Node.js >= 22. Make sure to use the version:
+   ```powershell
+   nvm use 22
+   ```
+
+**Clone, build, and run:**
+Its necessary to configure Node.js to trust your corporate TLS proxy by exporting the root certificate (e.g. from Edge) and setting:
+
+```powershell
+$env:NODE_EXTRA_CA_CERTS="C:\Appl\workspace\certificates\trusted_certs.crt"
+```
+
+Then run the same commands without disabling TLS:
+
+```powershell
+git clone https://github.com/sebastianrowek/pi-coding-agent.git
+cd pi-coding-agent
+
+npm install --ignore-scripts
+npm run build
+
+node packages/coding-agent/dist/cli.js
+```
+
+This approach preserves TLS verification while adding trust for the corporate proxy.
+
+### Docker (containerized execution)
+
+For environment isolation, pi can run entirely inside a Docker container. The container installs dependencies and builds from source — no Node.js needed on the host.
+
+**Clone the repo:**
+
+```powershell
+git clone https://github.com/sebastianrowek/pi-coding-agent.git
+cd pi-coding-agent
+```
+
+**Build:**
+
+```powershell
+# Build the image (installs deps + builds dist inside the container).
+# --build-context certs=... tells Docker where to find trusted_certs.crt
+# without copying it into the repo.
+docker build -t pi-local -f Dockerfile.local `
+  --build-context certs=C:\Appl\workspace\certificates `
+  .
+```
+
+OR
+
+```powershell
+.\docker-build.ps1
+```
+
+**Run:**
+
+```powershell
+.\docker-run.ps1
+```
+
+This mounts the current directory as `/workspace` (the only files pi can touch) and `~/.pi/agent` for config/sessions. The corporate cert is baked into the image's system CA store so Azure calls work without runtime env vars.
+The `.\docker-run.ps1` script also creates a temporary settings overlay to the global `~/.pi/agent/settings.json` file that adds a container-sepcific path to resourcePaths. The ressources from the repo-commited .pi folders are then mounted to the container-specific path.
+
+After source changes, rebuild and re-run:
+
+```powershell
+docker build -t pi-local -f Dockerfile.local `
+  --build-context certs=C:\Appl\workspace\certificates `
+  .
+.\docker-run.ps1
+```
+See [the Pi agent Docker documentation](https://github.com/sebastianrowek/wiki/blob/c45d06d80c737ad1999ca2d85e39117df35724ce/wiki/pi-agent/pi-agent-with-docker.md) for full details on the Dockerfile layers, caching, and volume mounts.
+
+### Persistent Instructions (AGENTS.md)
+
+Pi injects an `AGENTS.md` file into the system prompt automatically — this is the equivalent of Claude Code's `CLAUDE.md`. Place one in your project root for project-specific instructions, or at `~/.pi/agent/AGENTS.md` for global instructions that apply to every session. Pi walks up the directory tree from the current working directory to find the file. `CLAUDE.md` is also recognized as an alias. Use `--no-context-files` / `-nc` to disable loading, or `/reload` to reload mid-session.

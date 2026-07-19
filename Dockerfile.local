@@ -1,0 +1,39 @@
+FROM node:24-bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends bash ca-certificates git ripgrep \
+  && rm -rf /var/lib/apt/lists/*
+
+# Trust corporate TLS proxy certificate.
+# Required at build time so npm ci can reach the npm registry through the proxy.
+# Also applies at runtime for outbound HTTPS calls to Azure AI Foundry.
+COPY --from=certs trusted_certs.crt /usr/local/share/ca-certificates/corporate.crt
+RUN update-ca-certificates
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
+WORKDIR /app
+
+# --- Layer 1: install deps ---
+# Copy only package manifests. This layer is cached until package.json or
+# package-lock.json changes, so npm ci (slow) does not rerun on source edits.
+COPY package.json package-lock.json tsconfig.json tsconfig.base.json ./
+COPY packages/tui/package.json                                                    ./packages/tui/
+COPY packages/ai/package.json                                                     ./packages/ai/
+COPY packages/agent/package.json                                                  ./packages/agent/
+COPY packages/coding-agent/package.json                                           ./packages/coding-agent/
+COPY packages/coding-agent/examples/extensions/with-deps/package.json            ./packages/coding-agent/examples/extensions/with-deps/
+COPY packages/coding-agent/examples/extensions/custom-provider-anthropic/package.json ./packages/coding-agent/examples/extensions/custom-provider-anthropic/
+COPY packages/coding-agent/examples/extensions/custom-provider-gitlab-duo/package.json ./packages/coding-agent/examples/extensions/custom-provider-gitlab-duo/
+COPY packages/coding-agent/examples/extensions/sandbox/package.json              ./packages/coding-agent/examples/extensions/sandbox/
+COPY packages/coding-agent/examples/extensions/gondolin/package.json             ./packages/coding-agent/examples/extensions/gondolin/
+
+RUN npm ci --ignore-scripts
+
+# --- Layer 2: build ---
+# Copy source files and run the build. This layer reruns on any source change
+# but skips the npm ci layer above if deps did not change.
+COPY packages/ ./packages/
+RUN npm run build
+
+WORKDIR /workspace
+ENTRYPOINT ["node", "/app/packages/coding-agent/dist/cli.js"]

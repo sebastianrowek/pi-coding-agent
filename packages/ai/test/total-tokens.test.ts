@@ -635,10 +635,10 @@ describe("totalTokens field", () => {
 		);
 
 		it(
-			"deepseek/deepseek-chat - should return totalTokens equal to sum of components",
+			"deepseek/deepseek-v3.2 - should return totalTokens equal to sum of components",
 			{ retry: 3, timeout: 60000 },
 			async () => {
-				const llm = getModel("openrouter", "deepseek/deepseek-chat");
+				const llm = getModel("openrouter", "deepseek/deepseek-v3.2");
 
 				console.log(`\nOpenRouter / ${llm.id}:`);
 				const { first, second } = await testTotalTokensWithCache(llm, { apiKey: process.env.OPENROUTER_API_KEY });
@@ -652,10 +652,10 @@ describe("totalTokens field", () => {
 		);
 
 		it(
-			"mistralai/mistral-small-3.2-24b-instruct - should return totalTokens equal to sum of components",
+			"mistralai/mistral-large-2512 - should return totalTokens equal to sum of components",
 			{ retry: 3, timeout: 60000 },
 			async () => {
-				const llm = getModel("openrouter", "mistralai/mistral-small-3.2-24b-instruct");
+				const llm = getModel("openrouter", "mistralai/mistral-large-2512");
 
 				console.log(`\nOpenRouter / ${llm.id}:`);
 				const { first, second } = await testTotalTokensWithCache(llm, { apiKey: process.env.OPENROUTER_API_KEY });
@@ -686,10 +686,10 @@ describe("totalTokens field", () => {
 		);
 
 		it(
-			"deepseek/deepseek-chat - should return totalTokens equal to sum of components",
+			"deepseek/deepseek-v4-flash - should return totalTokens equal to sum of components",
 			{ retry: 3, timeout: 60000 },
 			async () => {
-				const llm = getModel("openrouter", "deepseek/deepseek-chat");
+				const llm = getModel("openrouter", "deepseek/deepseek-v4-flash");
 
 				console.log(`\nOpenRouter / ${llm.id}:`);
 				const { first, second } = await testTotalTokensWithCache(llm, { apiKey: process.env.OPENROUTER_API_KEY });

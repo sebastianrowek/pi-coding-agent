@@ -12,6 +12,12 @@ packages/*/dist-firefox/
 # Environment
 .env
 
+# venv
+.pi/**/.venv/
+
+# Certificates
+*.crt
+
 # Editor files
 .vscode/
 .zed/
