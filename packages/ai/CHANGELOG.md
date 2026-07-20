@@ -11,6 +11,7 @@
 - Fixed `streamSimple()` to send a context-aware max-token cap so providers that count input and output against one context window do not reject long requests ([#5595](https://github.com/earendil-works/pi/issues/5595)).
 - Fixed OpenAI Responses streams to preserve reasoning replay state when output items finish out of order ([#6009](https://github.com/earendil-works/pi/issues/6009)).
 - Fixed retry classification for provider errors that explicitly tell callers to retry the request ([#6019](https://github.com/earendil-works/pi/issues/6019)).
+- Fixed the `opencode-go` provider to declare the `openai-responses` API, so catalog regeneration no longer fails to type-check now that models.dev maps OpenCode Go models to that API.
 
 ## [0.80.2] - 2026-06-23
 
