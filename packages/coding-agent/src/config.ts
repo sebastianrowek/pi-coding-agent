@@ -560,6 +560,11 @@ export function getSessionsDir(): string {
 	return join(getAgentDir(), "sessions");
 }
 
+/** Get path to subagent child-session storage directory */
+export function getSubagentSessionsDir(): string {
+	return join(getSessionsDir(), "__subagents__");
+}
+
 /** Get path to debug log file */
 export function getDebugLogPath(): string {
 	return join(getAgentDir(), `${APP_NAME}-debug.log`);

@@ -346,7 +346,10 @@ async function createSessionManager(
 		}
 	}
 
-	return SessionManager.create(cwd, sessionDir, { id: parsed.sessionId });
+	return SessionManager.create(cwd, sessionDir, {
+		id: parsed.sessionId,
+		parentSession: parsed.parentSession,
+	});
 }
 
 function buildSessionOptions(

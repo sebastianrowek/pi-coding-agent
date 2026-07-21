@@ -25,6 +25,52 @@ A pi extension that registers a single `subagent` tool with three agents:
 
 Max 4 concurrent subagents (configurable). Each runs as an isolated `pi` process with no inherited context — all context must be in the task description.
 
+## Subagent Sessions & Traces
+
+Subagent child processes persist standard session files to a dedicated
+`__subagents__/` directory under the global sessions folder
+(`~/.pi/agent/sessions/__subagents__/`). Each child session links back to its
+parent session via the `parentSession` header field.
+
+The extension also writes a `subagent_trace` custom entry into the parent
+session, containing rolled-up usage totals and a per-child breakdown:
+
+```jsonc
+{
+  "version": 1,
+  "mode": "single" | "parallel",
+  "parentSessionId": "<uuid>",
+  "children": [
+    {
+      "agent": "scout",
+      "sessionId": "<child-uuid>",
+      "model": "claude-haiku-4-5",
+      "exitCode": 0,
+      "usage": { "input": 1234, "output": 567, "cacheRead": 0, "cacheWrite": 0, "cost": 0.0012, "turns": 3 }
+    }
+  ],
+  "totals": { "input": 1234, "output": 567, "cacheRead": 0, "cacheWrite": 0, "cost": 0.0012, "turns": 3 }
+}
+```
+
+### Discovery
+
+Child sessions in `__subagents__/` are excluded from per-project `--resume` but
+visible to `SessionManager.listAll()` and external session-scanning tools
+(e.g., agentsview). The `subagent_trace` entry provides cheap totals without
+reading child session files.
+
+When the parent session is ephemeral (`--no-session`), child sessions are also
+ephemeral — nothing is persisted.
+
+### TTL Sweeper
+
+Old child sessions are automatically cleaned up on extension startup.
+Default TTL is 60 days. Override with the `PI_SUBAGENT_SESSION_TTL_DAYS`
+environment variable.
+
+Parent aggregates survive child deletion, so cost history is preserved.
+
 ## Config
 
 Optional `config.json` next to `index.ts`:

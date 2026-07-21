@@ -10,6 +10,7 @@ export {
 	getExamplesPath,
 	getPackageDir,
 	getReadmePath,
+	getSubagentSessionsDir,
 	VERSION,
 } from "./config.ts";
 export {

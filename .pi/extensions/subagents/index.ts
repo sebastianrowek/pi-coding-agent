@@ -4,17 +4,32 @@
  * Registers a single `subagent` tool with three agents: scout, researcher, worker.
  * Supports single and parallel execution. Output is verbal only (no file handoff).
  */
+import * as crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { getMarkdownTheme, parseFrontmatter, truncateHead, withFileMutationQueue, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@mariozechner/pi-coding-agent";
+import { getMarkdownTheme, getSubagentSessionsDir, parseFrontmatter, truncateHead, withFileMutationQueue, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@mariozechner/pi-coding-agent";
 import { Container, Markdown, Spacer, Text, visibleWidth } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 
 // ── Types ──────────────────────────────────────────────────────────────
+
+interface SubagentTraceEntry {
+	version: 1;
+	mode: "single" | "parallel";
+	parentSessionId: string;
+	children: Array<{
+		agent: string;
+		sessionId?: string;
+		model?: string;
+		exitCode: number;
+		usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; turns: number };
+	}>;
+	totals: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; turns: number };
+}
 
 export interface AgentConfig {
 	name: string;
@@ -52,6 +67,7 @@ interface AgentResult {
 	progress: AgentProgress;
 	model?: string;
 	usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; turns: number };
+	sessionId?: string;
 }
 
 interface Details {
@@ -227,7 +243,9 @@ async function buildPiArgs(
 	agent: AgentConfig,
 	task: string,
 	cwd: string,
-): Promise<{ args: string[]; tempDir: string }> {
+	parentSessionFile?: string,
+	subagentDir?: string,
+): Promise<{ args: string[]; tempDir: string; childSessionId?: string }> {
 	const piBin = resolvePiBinary();
 	const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-sub-"));
 
@@ -237,7 +255,20 @@ async function buildPiArgs(
 		await fs.promises.writeFile(promptPath, agent.systemPrompt, { encoding: "utf-8", mode: 0o600 });
 	});
 
-	const args = [...piBin.baseArgs, "--mode", "json", "-p", "--no-session", "--no-skills"];
+	const persistChildren = !!parentSessionFile && !!subagentDir;
+	const args: string[] = [...piBin.baseArgs, "--mode", "json", "-p", "--no-skills"];
+	let childSessionId: string | undefined;
+	if (persistChildren) {
+		childSessionId = crypto.randomUUID();
+		args.push(
+			"--session-dir", subagentDir!,
+			"--session-id", childSessionId,
+			"--name", agent.name,
+		);
+		args.push("--parent-session", parentSessionFile!);
+	} else {
+		args.push("--no-session");
+	}
 
 	// Separate builtin tools from custom tools
 	const builtinTools: string[] = [];
@@ -280,7 +311,7 @@ async function buildPiArgs(
 		args.push(`Task: ${task}`);
 	}
 
-	return { args: [piBin.command, ...args], tempDir };
+	return { args: [piBin.command, ...args], tempDir, childSessionId };
 }
 
 function extractTextFromContent(content: unknown): string {
@@ -311,8 +342,10 @@ async function runSubagent(
 	cwd: string,
 	signal: AbortSignal | undefined,
 	onUpdate?: (progress: AgentProgress) => void,
+	parentSessionFile?: string,
+	subagentDir?: string,
 ): Promise<AgentResult> {
-	const { args, tempDir } = await buildPiArgs(agent, task, cwd);
+	const { args, tempDir, childSessionId } = await buildPiArgs(agent, task, cwd, parentSessionFile, subagentDir);
 	const command = args[0];
 	const spawnArgs = args.slice(1);
 
@@ -323,6 +356,7 @@ async function runSubagent(
 		exitCode: 0,
 		model: agent.model,
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 },
+		sessionId: childSessionId,
 		progress: {
 			agent: agent.name,
 			status: "running",
@@ -479,6 +513,21 @@ async function runSubagent(
 	}
 
 	return result;
+}
+
+// ── Usage Aggregation ─────────────────────────────────────────────────
+
+function sumUsage(results: AgentResult[]): AgentResult["usage"] {
+	const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
+	for (const r of results) {
+		totals.input += r.usage.input;
+		totals.output += r.usage.output;
+		totals.cacheRead += r.usage.cacheRead;
+		totals.cacheWrite += r.usage.cacheWrite;
+		totals.cost += r.usage.cost;
+		totals.turns += r.usage.turns;
+	}
+	return totals;
 }
 
 // ── Throttle ──────────────────────────────────────────────────────────
@@ -640,12 +689,41 @@ function renderAgentProgress(
 	return c;
 }
 
+// ── TTL Sweeper ──────────────────────────────────────────────────────
+
+function sweepSubagentSessions(dir: string, maxAgeMs: number): void {
+	try {
+		if (!fs.existsSync(dir)) return;
+		const now = Date.now();
+		for (const entry of fs.readdirSync(dir)) {
+			if (!entry.endsWith(".jsonl")) continue;
+			const filePath = path.join(dir, entry);
+			try {
+				const stat = fs.statSync(filePath);
+				if (now - stat.mtimeMs > maxAgeMs) {
+					fs.unlinkSync(filePath);
+				}
+			} catch {
+				// Skip files that can't be read/unlinked
+			}
+		}
+	} catch {
+		// Never throw from sweeper
+	}
+}
+
 // ── Extension ─────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
 	const config = loadConfig();
 	const maxConcurrency = config.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
 	agents = loadAgents();
+
+	// Startup sweep of old subagent child sessions
+	const DEFAULT_TTL_DAYS = 60;
+	const ttlDays = Number(process.env.PI_SUBAGENT_SESSION_TTL_DAYS) || DEFAULT_TTL_DAYS;
+	const ttlMs = ttlDays * 24 * 60 * 60 * 1000;
+	void Promise.resolve().then(() => sweepSubagentSessions(getSubagentSessionsDir(), ttlMs));
 
 	pi.registerTool({
 		name: "subagent",
@@ -679,6 +757,8 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const cwd = ctx.cwd;
+			const parentSessionFile = ctx.sessionManager.getSessionFile();
+			const subagentDir = parentSessionFile ? getSubagentSessionsDir() : undefined;
 
 			// Validate mode
 			if (params.tasks && params.tasks.length > 0) {
@@ -724,7 +804,7 @@ export default function (pi: ExtensionAPI) {
 					const result = await runSubagent(agent, t.task, t.cwd ?? cwd, signal, (progress) => {
 						allResults[idx].progress = progress;
 						fireParallelUpdate();
-					});
+					}, parentSessionFile, subagentDir);
 
 					// Update allResults with the completed result so the UI reflects it immediately
 					allResults[idx] = result;
@@ -732,6 +812,23 @@ export default function (pi: ExtensionAPI) {
 
 					return result;
 				});
+
+				// Write parent aggregate
+				if (parentSessionFile) {
+					pi.appendEntry("subagent_trace", {
+						version: 1 as const,
+						mode: "parallel" as const,
+						parentSessionId: ctx.sessionManager.getSessionId(),
+						children: results.map((r) => ({
+							agent: r.agent,
+							sessionId: r.sessionId,
+							model: r.model,
+							exitCode: r.exitCode,
+							usage: r.usage,
+						})),
+						totals: sumUsage(results),
+					} satisfies SubagentTraceEntry);
+				}
 
 				// Build final output text
 				const outputParts = results.map((r) => {
@@ -766,7 +863,24 @@ export default function (pi: ExtensionAPI) {
 						content: [{ type: "text", text: "(running...)" }],
 						details: { mode: "single" as const, results: [liveResult] },
 					});
-				});
+				}, parentSessionFile, subagentDir);
+
+				// Write parent aggregate
+				if (parentSessionFile) {
+					pi.appendEntry("subagent_trace", {
+						version: 1 as const,
+						mode: "single" as const,
+						parentSessionId: ctx.sessionManager.getSessionId(),
+						children: [{
+							agent: result.agent,
+							sessionId: result.sessionId,
+							model: result.model,
+							exitCode: result.exitCode,
+							usage: result.usage,
+						}],
+						totals: sumUsage([result]),
+					} satisfies SubagentTraceEntry);
+				}
 
 				const isError = result.exitCode !== 0 || !!result.progress.error;
 				return {
