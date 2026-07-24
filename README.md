@@ -105,7 +105,7 @@ This is a personal fork of [earendil-works/pi](https://github.com/earendil-works
 ### Changes from upstream
 
 #### Core modifications
-- **`resourcePaths` setting** — If you want repo-committed skills/extensions to work no matter where you start pi from, add their `.pi` root to `"resourcePaths": [...]` in `~/.pi/agent/settings.json`. Pi then auto-discovers `extensions/`, `skills/`, `prompts/`, and `themes/` from that root, which keeps the resources in the repo but makes them available globally. 
+- **Resource settings (`extensions`/`skills`/`prompts`/`themes`)** — Pi discovers resources from the corresponding arrays in `settings.json`. The Docker script temporarily overlays these arrays with the mounted `/pi-resources/<type>` directories so repo-committed resources are available inside the container without modifying your global settings.
 - **Corporate certificate handling** — TO BE FILLED
 
 
@@ -198,7 +198,7 @@ OR
 ```
 
 This mounts the current directory as `/workspace` (the only files pi can touch) and `~/.pi/agent` for config/sessions. The corporate cert is baked into the image's system CA store so Azure calls work without runtime env vars.
-The `.\docker-run.ps1` script also creates a temporary settings overlay to the global `~/.pi/agent/settings.json` file that adds a container-sepcific path to resourcePaths. The ressources from the repo-commited .pi folders are then mounted to the container-specific path.
+When launched outside this repository, the `.\docker-run.ps1` script creates a temporary overlay of `~/.pi/agent/settings.json` that appends `/pi-resources/extensions`, `/pi-resources/skills`, `/pi-resources/prompts`, and `/pi-resources/themes` to the existing `extensions`, `skills`, `prompts`, and `themes` arrays. When launched from this repository, Pi discovers the same resources from `/workspace/.pi` instead, avoiding duplicate extension loads. The repo's `.pi` folder is mounted read-only at `/pi-resources`, so the container can discover the committed resources without altering host settings.
 
 After source changes, rebuild and re-run:
 

@@ -4,23 +4,51 @@ $agentDir = Join-Path $env:USERPROFILE ".pi\agent"
 $settingsPath = Join-Path $agentDir "settings.json"
 $temporarySettingsPath = Join-Path $env:TEMP "pi-docker-settings-$([guid]::NewGuid()).json"
 $exitCode = 1
-# Disable Bash guard, because the container is already running in a container
-$env:BASH_GUARD_DISABLE=1
+
+# Disable Bash guard, because the container is already running in a container.
+$env:BASH_GUARD_DISABLE = 1
+
+# When launched from this repository, the repository's .pi directory is already
+# available at /workspace/.pi through the current-directory bind mount. Do not
+# also configure it through /pi-resources, or Pi will load every resource twice.
+$repositoryDir = (Resolve-Path -LiteralPath $PSScriptRoot).Path.TrimEnd([char[]]@('\', '/'))
+$launchDir = (Resolve-Path -LiteralPath (Get-Location).Path).Path.TrimEnd([char[]]@('\', '/'))
+
+$launchedFromRepository = [string]::Equals(
+  $launchDir,
+  $repositoryDir,
+  [System.StringComparison]::OrdinalIgnoreCase
+)
 
 try {
   # Pi settings use host paths outside Docker. Generate a temporary settings
-  # overlay that also tells the container to discover /pi-resources.
+  # overlay. When launched outside this repository, append the mounted
+  # /pi-resources directories so Pi can discover the committed resources.
   $settings = if (Test-Path $settingsPath) {
     Get-Content -Raw $settingsPath | ConvertFrom-Json
   } else {
     [pscustomobject]@{}
   }
 
-  $resourcePaths = @($settings.resourcePaths | Where-Object { $_ -is [string] -and $_ })
-  if ($resourcePaths -notcontains "/pi-resources") {
-    $resourcePaths += "/pi-resources"
+  foreach ($type in @("extensions", "skills", "prompts", "themes")) {
+    $containerPath = "/pi-resources/$type"
+    $existing = @()
+
+    if ($settings.$type) {
+      $existing = @(
+        $settings.$type | Where-Object {
+          $_ -is [string] -and $_ -and $_ -ne $containerPath
+        }
+      )
+    }
+
+    if (-not $launchedFromRepository) {
+      $existing += $containerPath
+    }
+
+    $settings | Add-Member -NotePropertyName $type -NotePropertyValue $existing -Force
   }
-  $settings | Add-Member -NotePropertyName resourcePaths -NotePropertyValue $resourcePaths -Force
+
   # Windows PowerShell's Set-Content -Encoding utf8 writes a BOM, which Pi's
   # JSON parser rejects. JSON settings are ASCII-compatible, so use ASCII to
   # produce a BOM-free file that works in constrained-language mode.
@@ -38,6 +66,7 @@ try {
     -v "${PSScriptRoot}\.pi:/pi-resources:ro" `
     -v "${temporarySettingsPath}:/root/.pi/agent/settings.json:ro" `
     pi-local
+
   $exitCode = $LASTEXITCODE
 } finally {
   # Docker bind mounts use live host files. Remove the temporary file only
